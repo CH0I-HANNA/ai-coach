@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>길벗</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <video id="camera" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+
+    <div id="mode-indicator">
+      <span id="mode-icon">⏳</span>
+      <span id="mode-text">대기 중</span>
+    </div>
+
+    <div id="alert-box">
+      <p id="alert-text"></p>
+    </div>
+
+    <div id="border-flash"></div>
+
+    <div id="mic-indicator">
+      <span id="mic-icon">🎤</span>
+      <span>질문하세요</span>
+    </div>
+
+    <audio id="tts-player" autoplay></audio>
+  </div>
+
+  <script src="/static/js/main.js"></script>
+</body>
+</html>
