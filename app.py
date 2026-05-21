@@ -2,6 +2,9 @@ import base64
 import os
 import threading
 
+os.environ["DISPLAY"] = ""
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "0"
+
 import cv2
 import numpy as np
 from flask import Flask, jsonify, render_template, request, send_from_directory
