@@ -1,2 +1,16 @@
 [phases.setup]
-nixPkgs = ["libxcb", "libGL", "libglib2.0"]
+nixPkgs = [
+  "python311",
+  "libxcb",
+  "xorg.libX11",
+  "xorg.libXext",
+  "xorg.libXrender",
+  "libGL",
+  "glib"
+]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "gunicorn app:app --bind 0.0.0.0:$PORT"
