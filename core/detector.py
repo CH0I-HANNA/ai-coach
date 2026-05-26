@@ -23,9 +23,21 @@ class BowDetector:
         self.last_alert_time: dict[str, float] = {}
         self.last_traffic_state: str = "none"
         self.tl_analyzer = TrafficLightAnalyzer()
+        self._frame_idx = 0
+        self._last_result: dict | None = None
+
+    def _resize_for_inference(self, frame):
+        h, w = frame.shape[:2]
+        if w > 640:
+            frame = cv2.resize(frame, (640, int(h * 640 / w)))
+        return frame
 
     def detect(self, frame, mode: str) -> dict:
-        results = self.model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
+        self._frame_idx += 1
+        if self._frame_idx % 2 == 0 and self._last_result is not None:
+            return self._last_result
+
+        results = self.model.track(self._resize_for_inference(frame), persist=True, tracker="bytetrack.yaml", verbose=False)[0]
         objects = []
 
         for box in results.boxes:
@@ -47,12 +59,13 @@ class BowDetector:
 
         alert, alert_type, traffic_light = self._build_alert(frame, objects, mode)
 
-        return {
+        self._last_result = {
             "objects": objects,
             "alert": alert,
             "alert_type": alert_type,
             "traffic_light": traffic_light,
         }
+        return self._last_result
 
     def _color_detect_traffic_light(self, frame) -> str:
         h = frame.shape[0]

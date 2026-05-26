@@ -76,12 +76,14 @@ function switchMode() {
 
 // ── Frame capture ─────────────────────────────────────────
 function captureFrame() {
+  const srcW = camera.videoWidth  || 640;
+  const srcH = camera.videoHeight || 480;
+  const scale = srcW > 640 ? 640 / srcW : 1;
   const tmp = document.createElement('canvas');
-  tmp.width  = camera.videoWidth  || 640;
-  tmp.height = camera.videoHeight || 480;
+  tmp.width  = Math.round(srcW * scale);
+  tmp.height = Math.round(srcH * scale);
   tmp.getContext('2d').drawImage(camera, 0, 0, tmp.width, tmp.height);
-  // strip "data:image/jpeg;base64," prefix
-  return tmp.toDataURL('image/jpeg', 0.7).split(',')[1];
+  return tmp.toDataURL('image/jpeg', 0.5).split(',')[1];
 }
 
 // ── Analyze loop ──────────────────────────────────────────
