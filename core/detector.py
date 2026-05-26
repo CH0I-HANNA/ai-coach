@@ -36,6 +36,11 @@ class BowDetector:
         return frame
 
     def detect(self, frame, mode: str) -> dict:
+        if mode != getattr(self, '_last_mode', None):
+            self._signal_history.clear()
+            self.last_traffic_state = "none"
+            self._last_mode = mode
+
         self._frame_idx += 1
         if self._frame_idx % 2 == 0 and self._last_result is not None:
             return self._last_result
@@ -99,6 +104,7 @@ class BowDetector:
 
         if mode == "crosswalk":
             tl_objects = [o for o in objects if o["class_id"] == 9]
+            yolo_detected = bool(tl_objects)
 
             if tl_objects:
                 tl = max(tl_objects, key=lambda o: (o["bbox"][2] - o["bbox"][0]) * (o["bbox"][3] - o["bbox"][1]))
@@ -106,9 +112,15 @@ class BowDetector:
             else:
                 traffic_light = self._color_detect_traffic_light(frame)
 
-            self._signal_history.append(traffic_light)
-            if len(self._signal_history) > self.SIGNAL_CONFIRM_FRAMES:
-                self._signal_history.pop(0)
+            color_detected = traffic_light in ("red", "green")
+
+            # 신호등이 감지된 경우에만 히스토리 업데이트
+            if yolo_detected or color_detected:
+                self._signal_history.append(traffic_light)
+                if len(self._signal_history) > self.SIGNAL_CONFIRM_FRAMES:
+                    self._signal_history.pop(0)
+            else:
+                self._signal_history.clear()
 
             confirmed = (
                 len(self._signal_history) == self.SIGNAL_CONFIRM_FRAMES
@@ -123,13 +135,13 @@ class BowDetector:
                         return "초록불입니다. 건너세요", "safe", traffic_light
                     elif traffic_light == "red":
                         return "빨간불입니다. 기다리세요", "danger", traffic_light
-            else:
-                # 신호등 미감지 → 차량 확인
+
+            elif not yolo_detected and not color_detected:
+                # 신호등이 진짜로 없는 경우에만 차량 확인
                 if self._should_alert("no_tl", 5.0):
                     return "비신호 횡단보도입니다. 차량을 확인합니다", "info", traffic_light
 
                 vehicles = [o for o in objects if o["class_id"] in self.VEHICLE_CLASSES]
-                # 횡단보도 위험 차량 = 화면 하단 2/3에 위치한 차량 (측면에서 접근 중)
                 frame_h = frame.shape[0]
                 approaching = [
                     v for v in vehicles
