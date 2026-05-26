@@ -177,11 +177,12 @@ class BowDetector:
 
             color_detected = traffic_light in ("red", "green")
 
-            if yolo_detected or color_detected:
+            # 색상이 확인된 경우에만 히스토리에 추가 (unknown은 쌓지 않음)
+            if color_detected:
                 self._signal_history.append(traffic_light)
                 if len(self._signal_history) > self.SIGNAL_CONFIRM_FRAMES:
                     self._signal_history.pop(0)
-            else:
+            elif not yolo_detected:
                 self._signal_history.clear()
 
             confirmed = (
@@ -198,6 +199,11 @@ class BowDetector:
                         return f"초록불입니다. 건너세요{night_suffix}", "safe", traffic_light
                     elif traffic_light == "red":
                         return f"빨간불입니다. 기다리세요{night_suffix}", "danger", traffic_light
+
+            elif yolo_detected and not color_detected:
+                # 신호등은 보이지만 색상 판별 불가 → 사용자에게 알림
+                if self._should_alert("tl_detected", 5.0):
+                    return "신호등이 보입니다. 색상을 확인하세요", "info", traffic_light
 
             elif not yolo_detected and not color_detected:
                 if self._detect_crosswalk(frame) and self._should_alert("crosswalk", 10.0):
