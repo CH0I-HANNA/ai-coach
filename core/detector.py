@@ -18,6 +18,8 @@ class BowDetector:
 
     VEHICLE_CLASSES = {2, 3, 5, 7}
 
+    SIGNAL_CONFIRM_FRAMES = 3
+
     def __init__(self):
         self.model = YOLO("yolov8s.pt")
         self.last_alert_time: dict[str, float] = {}
@@ -25,6 +27,7 @@ class BowDetector:
         self.tl_analyzer = TrafficLightAnalyzer()
         self._frame_idx = 0
         self._last_result: dict | None = None
+        self._signal_history: list[str] = []
 
     def _resize_for_inference(self, frame):
         h, w = frame.shape[:2]
@@ -68,16 +71,22 @@ class BowDetector:
         return self._last_result
 
     def _color_detect_traffic_light(self, frame) -> str:
-        h = frame.shape[0]
-        roi = frame[:int(h * 0.4), :]
+        h, w = frame.shape[:2]
+        # 화면 중앙 40% 폭, 상단 35% 높이만 검사 — 간판·차량 등 측면 노이즈 제거
+        x1, x2 = int(w * 0.30), int(w * 0.70)
+        y2 = int(h * 0.35)
+        roi = frame[:y2, x1:x2]
+        if roi.size == 0:
+            return "none"
+
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         total = roi.shape[0] * roi.shape[1]
 
         red_mask = cv2.bitwise_or(
-            cv2.inRange(hsv, np.array([0, 100, 100]), np.array([10, 255, 255])),
-            cv2.inRange(hsv, np.array([160, 100, 100]), np.array([180, 255, 255])),
+            cv2.inRange(hsv, np.array([0, 120, 120]), np.array([10, 255, 255])),
+            cv2.inRange(hsv, np.array([160, 120, 120]), np.array([180, 255, 255])),
         )
-        green_mask = cv2.inRange(hsv, np.array([40, 100, 100]), np.array([80, 255, 255]))
+        green_mask = cv2.inRange(hsv, np.array([45, 120, 120]), np.array([75, 255, 255]))
 
         if cv2.countNonZero(red_mask) / total > 0.05:
             return "red"
@@ -92,12 +101,22 @@ class BowDetector:
             tl_objects = [o for o in objects if o["class_id"] == 9]
 
             if tl_objects:
-                tl = tl_objects[0]
+                tl = max(tl_objects, key=lambda o: (o["bbox"][2] - o["bbox"][0]) * (o["bbox"][3] - o["bbox"][1]))
                 traffic_light = self.tl_analyzer.analyze(frame, tl["bbox"])
             else:
                 traffic_light = self._color_detect_traffic_light(frame)
 
-            if traffic_light in ("red", "green"):
+            self._signal_history.append(traffic_light)
+            if len(self._signal_history) > self.SIGNAL_CONFIRM_FRAMES:
+                self._signal_history.pop(0)
+
+            confirmed = (
+                len(self._signal_history) == self.SIGNAL_CONFIRM_FRAMES
+                and len(set(self._signal_history)) == 1
+                and traffic_light in ("red", "green")
+            )
+
+            if confirmed:
                 if traffic_light != self.last_traffic_state:
                     self.last_traffic_state = traffic_light
                     if traffic_light == "green":
@@ -110,9 +129,15 @@ class BowDetector:
                     return "비신호 횡단보도입니다. 차량을 확인합니다", "info", traffic_light
 
                 vehicles = [o for o in objects if o["class_id"] in self.VEHICLE_CLASSES]
-                close_vehicles = [v for v in vehicles if v["distance"] in ("very_close", "close")]
+                # 횡단보도 위험 차량 = 화면 하단 2/3에 위치한 차량 (측면에서 접근 중)
+                frame_h = frame.shape[0]
+                approaching = [
+                    v for v in vehicles
+                    if v["distance"] in ("very_close", "close")
+                    and (v["bbox"][1] + v["bbox"][3]) / 2 > frame_h * 0.33
+                ]
 
-                if close_vehicles and self._should_alert("vehicle_approach", 1.0):
+                if approaching and self._should_alert("vehicle_approach", 1.0):
                     return "차량이 접근하고 있습니다. 기다리세요", "danger", traffic_light
 
                 if not vehicles and self._should_alert("no_vehicle", 5.0):

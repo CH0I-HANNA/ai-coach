@@ -9,10 +9,15 @@ class TrafficLightAnalyzer:
         red_count = self._count_color(top_region, "red")
         green_count = self._count_color(bottom_region, "green")
 
-        threshold = 50
-        if red_count > threshold and red_count > green_count:
+        top_area = top_region.shape[0] * top_region.shape[1] if top_region.size > 0 else 1
+        bot_area = bottom_region.shape[0] * bottom_region.shape[1] if bottom_region.size > 0 else 1
+
+        red_ratio = red_count / top_area
+        green_ratio = green_count / bot_area
+
+        if red_ratio > 0.03 and red_ratio > green_ratio:
             return "red"
-        elif green_count > threshold and green_count > red_count:
+        elif green_ratio > 0.03 and green_ratio > red_ratio:
             return "green"
         return "unknown"
 
