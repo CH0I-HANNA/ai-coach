@@ -3,7 +3,7 @@ flask-cors==4.0.1
 ultralytics>=8.0.0
 opencv-python-headless==4.8.1.78
 numpy>=1.26.4
-gtts==2.5.1
+edge-tts>=6.1.9
 google-genai>=2.0.0
 Pillow>=10.4.0
 requests==2.32.3
