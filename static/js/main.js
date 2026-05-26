@@ -8,6 +8,9 @@ let isExplaining = false;
 let analyzeTimer = null;
 let longPressTimer = null;
 let longPressTriggered = false;
+let currentAnalyzeController = null;
+let currentAskReader = null;
+let askCancelled = false;
 
 // ── DOM refs ──────────────────────────────────────────────
 const camera        = document.getElementById('camera');
@@ -51,16 +54,36 @@ function updateModeIndicator() {
   modeIndicator.className = cfg.cls;
 }
 
-function interruptTTS() {
+function interruptAll() {
+  // TTS 즉시 중단
   ttsQueue.length = 0;
   ttsPlaying = false;
   ttsPlayer.pause();
   ttsPlayer.src = '';
   if ('speechSynthesis' in window) speechSynthesis.cancel();
+
+  // 진행 중인 /analyze 요청 취소
+  if (currentAnalyzeController) {
+    currentAnalyzeController.abort();
+    currentAnalyzeController = null;
+  }
+
+  // 진행 중인 /ask 스트림 취소
+  askCancelled = true;
+  if (currentAskReader) {
+    currentAskReader.cancel().catch(() => {});
+    currentAskReader = null;
+  }
+  isExplaining = false;
+
+  // 자막·테두리 즉시 초기화
+  clearTimeout(alertClearTimer);
+  alertText.textContent = '';
+  borderFlash.className = '';
 }
 
 function switchMode() {
-  interruptTTS();
+  interruptAll();
   if (currentMode === 'waiting' || currentMode === 'sidewalk') {
     currentMode = 'crosswalk';
     showAlert('횡단보도 모드', 'info');
@@ -99,11 +122,13 @@ async function analyzeFrame() {
   let frame;
   try { frame = captureFrame(); } catch { return; }
 
+  currentAnalyzeController = new AbortController();
   try {
     const res = await fetch('/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ frame, mode: currentMode }),
+      signal: currentAnalyzeController.signal,
     });
     const data = await res.json();
 
@@ -113,15 +138,18 @@ async function analyzeFrame() {
     }
 
     drawOverlay(data.detections || []);
-  } catch { /* network error — skip frame */ }
+  } catch (e) {
+    if (e?.name !== 'AbortError') { /* network error — skip frame */ }
+  } finally {
+    currentAnalyzeController = null;
+  }
 }
 
 // ── Voice question ────────────────────────────────────────
 const LISTEN_TIMEOUT_MS = 8000;
 
 function startVoiceQuestion() {
-  interruptTTS();
-  isExplaining = false;
+  interruptAll();
 
   let frame;
   try { frame = captureFrame(); } catch { return; }
@@ -178,6 +206,7 @@ function startRecognition(frame) {
 async function sendAsk(frame, question) {
   if (isExplaining) return;
   isExplaining = true;
+  askCancelled = false;
   showAlert('답변 생성 중…', 'info');
 
   try {
@@ -189,19 +218,21 @@ async function sendAsk(frame, question) {
     if (!res.ok) throw new Error('server error');
 
     const reader = res.body.getReader();
+    currentAskReader = reader;
     const decoder = new TextDecoder();
     let buffer = '';
     let fullText = '';
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done || askCancelled) break;
 
       buffer += decoder.decode(value, { stream: true });
       const parts = buffer.split('\n\n');
       buffer = parts.pop();
 
       for (const part of parts) {
+        if (askCancelled) break;
         if (!part.startsWith('data: ')) continue;
         const json = JSON.parse(part.slice(6));
         if (json.text) {
@@ -213,9 +244,10 @@ async function sendAsk(frame, question) {
         }
       }
     }
-  } catch {
-    showAlert('분석 중 오류가 발생했습니다', 'info');
+  } catch (e) {
+    if (!askCancelled) showAlert('분석 중 오류가 발생했습니다', 'info');
   } finally {
+    currentAskReader = null;
     isExplaining = false;
   }
 }
@@ -240,14 +272,16 @@ function drainTTSQueue() {
   ttsPlaying = true;
   const item = ttsQueue.shift();
 
-  if (item.alertText) showAlert(item.alertText, item.alertType);
-
   if (item.type === 'url') {
     ttsPlayer.src = item.value;
     ttsPlayer.onended = onTTSDone;
     ttsPlayer.onerror = onTTSDone;
-    ttsPlayer.play().catch(onTTSDone);
+    // 오디오 재생이 실제로 시작되는 순간 자막 표시 → 싱크 일치
+    ttsPlayer.play()
+      .then(() => { if (item.alertText) showAlert(item.alertText, item.alertType); })
+      .catch(onTTSDone);
   } else {
+    if (item.alertText) showAlert(item.alertText, item.alertType);
     const utt = new SpeechSynthesisUtterance(item.value);
     utt.lang = 'ko-KR';
     utt.onend   = onTTSDone;
