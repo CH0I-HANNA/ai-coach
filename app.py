@@ -1,13 +1,13 @@
 import base64
+import json
 import os
-import threading
 
 os.environ["DISPLAY"] = ""
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "0"
 
 import cv2
 import numpy as np
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
 from flask_cors import CORS
 
 from core.detector import BowDetector
@@ -64,23 +64,15 @@ def analyze():
     })
 
 
-@app.route("/explain", methods=["POST"])
-def explain():
-    data = request.get_json(force=True)
-    frame_b64 = data.get("frame", "")
-
-    frame = _decode_frame(frame_b64)
-    if frame is None:
-        return jsonify({"error": "invalid frame"}), 400
-
-    description = explainer.explain(frame)
+def _sse_stream(chunks):
+    full_text = ""
+    for chunk in chunks:
+        full_text += chunk
+        yield f"data: {json.dumps({'text': chunk})}\n\n"
     tts.cleanup_old_files()
-    audio_url = tts.generate(description)
+    audio_url = tts.generate(full_text)
+    yield f"data: {json.dumps({'done': True, 'description': full_text, 'audio_url': audio_url})}\n\n"
 
-    return jsonify({
-        "description": description,
-        "audio_url": audio_url,
-    })
 
 
 @app.route("/ask", methods=["POST"])
@@ -96,14 +88,10 @@ def ask():
     if frame is None:
         return jsonify({"error": "invalid frame"}), 400
 
-    answer = explainer.ask(frame, question)
-    tts.cleanup_old_files()
-    audio_url = tts.generate(answer)
-
-    return jsonify({
-        "description": answer,
-        "audio_url": audio_url,
-    })
+    return Response(
+        stream_with_context(_sse_stream(explainer.ask_stream(frame, question))),
+        mimetype="text/event-stream",
+    )
 
 
 @app.route("/audio/<path:filename>")

@@ -184,9 +184,33 @@ async function sendAsk(frame, question) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ frame, question }),
     });
-    const data = await res.json();
-    if (data.audio_url) playTTSUrl(data.audio_url, data.description || '', 'info');
-    else showAlert(data.description || '', 'info');
+    if (!res.ok) throw new Error('server error');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        if (!part.startsWith('data: ')) continue;
+        const json = JSON.parse(part.slice(6));
+        if (json.text) {
+          fullText += json.text;
+          showAlert(fullText, 'info');
+        }
+        if (json.done) {
+          if (json.audio_url) playTTSUrl(json.audio_url, json.description || '', 'info');
+        }
+      }
+    }
   } catch {
     showAlert('분석 중 오류가 발생했습니다', 'info');
   } finally {

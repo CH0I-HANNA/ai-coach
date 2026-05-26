@@ -19,13 +19,13 @@ class BowDetector:
     VEHICLE_CLASSES = {2, 3, 5, 7}
 
     def __init__(self):
-        self.model = YOLO("yolov8n.pt")
+        self.model = YOLO("yolov8s.pt")
         self.last_alert_time: dict[str, float] = {}
         self.last_traffic_state: str = "none"
         self.tl_analyzer = TrafficLightAnalyzer()
 
     def detect(self, frame, mode: str) -> dict:
-        results = self.model(frame, verbose=False)[0]
+        results = self.model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
         objects = []
 
         for box in results.boxes:
@@ -54,6 +54,24 @@ class BowDetector:
             "traffic_light": traffic_light,
         }
 
+    def _color_detect_traffic_light(self, frame) -> str:
+        h = frame.shape[0]
+        roi = frame[:int(h * 0.4), :]
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        total = roi.shape[0] * roi.shape[1]
+
+        red_mask = cv2.bitwise_or(
+            cv2.inRange(hsv, np.array([0, 100, 100]), np.array([10, 255, 255])),
+            cv2.inRange(hsv, np.array([160, 100, 100]), np.array([180, 255, 255])),
+        )
+        green_mask = cv2.inRange(hsv, np.array([40, 100, 100]), np.array([80, 255, 255]))
+
+        if cv2.countNonZero(red_mask) / total > 0.05:
+            return "red"
+        if cv2.countNonZero(green_mask) / total > 0.05:
+            return "green"
+        return "none"
+
     def _build_alert(self, frame, objects, mode: str):
         traffic_light = "none"
 
@@ -63,7 +81,10 @@ class BowDetector:
             if tl_objects:
                 tl = tl_objects[0]
                 traffic_light = self.tl_analyzer.analyze(frame, tl["bbox"])
+            else:
+                traffic_light = self._color_detect_traffic_light(frame)
 
+            if traffic_light in ("red", "green"):
                 if traffic_light != self.last_traffic_state:
                     self.last_traffic_state = traffic_light
                     if traffic_light == "green":
